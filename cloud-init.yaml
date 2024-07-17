@@ -1,0 +1,74 @@
+Content-Type: multipart/mixed; boundary="===============4581654899675655308=="
+MIME-Version: 1.0
+Number-Attachments: 1
+
+--===============4581654899675655308==
+MIME-Version: 1.0
+Content-Type: text/cloud-config
+Content-Disposition: attachment; filename="part-001"
+
+#cloud-config
+
+users:
+ - default
+ - name: coredns
+   gecos: CoreDNS
+   shell: /bin/false
+   homedir: /var/lib/coredns
+
+write_files:
+  - path: /usr/lib/tmpfiles.d/coredns-sysusers.conf
+    permissions: "0755"
+    content: |
+      u root - "CoreDNS is a DNS server that chains plugins" /var/lib/coredns
+    owner: root:root
+  - path: /usr/lib/tmpfiles.d/coredns-tmpfiles.conf
+    permissions: "0755"
+    content: |
+      d /var/lib/coredns 0755 root root -
+    owner: root:root
+  - path: /etc/coredns/Corefile
+    permissions: "0755"
+    content: |
+      .:54 {
+        log
+        debug
+        errors
+        ready 0.0.0.0:80
+        forward . 8.8.8.8:53
+      }
+    owner: root:root
+  - path: /usr/lib/systemd/system/coredns.service
+    permissions: "0755"
+    content: |
+      [Unit]
+      Description=CoreDNS DNS server
+      Documentation=https://coredns.io
+      After=network.target
+      
+      [Service]
+      PermissionsStartOnly=true
+      LimitNOFILE=1048576
+      LimitNPROC=512
+      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+      NoNewPrivileges=true
+      User=root
+      WorkingDirectory=/var/lib/coredns
+      ExecStart=/usr/bin/coredns -conf=/etc/coredns/Corefile
+      ExecReload=/bin/kill -SIGUSR1 $MAINPID
+      Restart=on-failure
+      
+      [Install]
+      WantedBy=multi-user.target
+    owner: root:root
+
+runcmd:
+  - curl -LO https://github.com/coredns/coredns/releases/download/v1.11.1/coredns_1.11.1_linux_amd64.tgz
+  - tar zxvf coredns_1.11.1_linux_amd64.tgz
+  - chmod +x coredns
+  - sudo mv coredns /usr/bin
+  - rm coredns_1.11.1_linux_amd64.tgz
+  - systemctl enable coredns
+  - systemctl start coredns
+--===============4581654899675655308==--
