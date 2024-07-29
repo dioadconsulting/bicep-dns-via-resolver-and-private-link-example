@@ -5,9 +5,6 @@ param vmAdminUsername string
 @secure()
 param vmAdminPassword string
 
-@description('The size of the VM')
-param vmSize string = 'Standard_D2_v3'
-
 @description('Location for all resources.')
 param location string = resourceGroup().location
 
@@ -26,7 +23,6 @@ var healthProbeName = 'myHealthProbe'
 
 var vmName = take('myVm${uniqueString(resourceGroup().id)}', 15)
 var networkInterfaceName = '${vmName}NetInt'
-var vmConsumerName = take('myConsumerVm${uniqueString(resourceGroup().id)}', 15)
 
 var privatelinkServiceName = 'myPLS'
 var loadbalancerId = loadbalancer.id
