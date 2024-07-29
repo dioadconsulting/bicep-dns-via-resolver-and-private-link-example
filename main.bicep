@@ -17,10 +17,10 @@ module privateLinkService 'module.private-link-service.bicep' = {
   }
 }
 
-module consumerOne 'module.consuming-vnet.bicep' = {
-  name: 'consumerOne'
+module workloadOne 'module.workload-vnet.bicep' = {
+  name: 'workloadOne'
   params: {
-    name: 'consumerOne'
+    name: 'workloadOne'
     location: location
     privatelinkServiceId: privateLinkService.outputs.privateLinkServiceId 
     vmAdminPassword:vmAdminPassword
@@ -28,13 +28,14 @@ module consumerOne 'module.consuming-vnet.bicep' = {
   }
 }
 
-module consumerTwo 'module.consuming-vnet.bicep' = {
-  name: 'consumerTwo'
+module workloadTwo 'module.workload-vnet.bicep' = {
+  name: 'workloadTwo'
   params: {
-    name: 'consumerTwo'
+    name: 'workloadTwo'
     location: location
     privatelinkServiceId: privateLinkService.outputs.privateLinkServiceId 
     vmAdminPassword:vmAdminPassword
     vmAdminUsername:vmAdminUsername
+    useOutboundResolver: false
   }
 }

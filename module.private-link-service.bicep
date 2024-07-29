@@ -293,8 +293,8 @@ resource vm 'Microsoft.Compute/virtualMachines@2021-11-01' = {
       }
       imageReference: {
         publisher: 'Canonical'
-        offer: '0001-com-ubuntu-server-mantic'
-        sku: '23_10-gen2'
+        offer: 'ubuntu-24_04-lts'
+        sku: 'ubuntu-pro-gen1'
         version: 'latest'
       }
       dataDisks: []

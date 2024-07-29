@@ -4,17 +4,17 @@ param name string
 param privatelinkServiceId string
 
 //var vnetName = 'myVirtualNetwork'
-var vnetConsumerName = '${name}VNet'
+var vnetWorkloadName = '${name}VNet'
 var vnetAddressPrefix = '10.0.0.0/16'
 
-var backendSubnetPrefix = '10.0.2.0/24'
-var backendSubnetName = 'backendSubnet'
-var consumerSubnetPrefix = '10.0.0.0/24'
-var consumerSubnetName = 'endpointSubnet'
-var resolverSubnetPrefix = '10.0.1.0/24'
-var resolverSubnetName = 'resolverSubnet'
+var endpointSubnetPrefix = '10.0.2.0/24'
+var endpointSubnetName = '${name}BackendSubnet'
+var workloadSubnetPrefix = '10.0.0.0/24'
+var workloadSubnetName = '${name}EndpointSubnet'
+var resolverSubnetPrefix = '10.0.4.0/24'
+var resolverSubnetName = '${name}ResolverSubnet'
 
-var consumerNetworkInterfaceName = '${name}ConsumerNic'
+var workloadNetworkInterfaceName = '${name}ConsumerNic'
 
 @description('Username for the Virtual Machine.')
 param vmAdminUsername string
@@ -23,18 +23,22 @@ param vmAdminUsername string
 @secure()
 param vmAdminPassword string
 
+@description('If set to false, the DHCP DNS server list will be set to the IP address of the private link endpoint, if false will use Azure DNS and outbound resolver')
+param useOutboundResolver bool = true
+
 var privateEndpointName = '${name}DnsEndpoint'
 
-var vmConsumerName = take('${name}${uniqueString(resourceGroup().id)}', 15)
+var vmWorkloadName = take('${name}${uniqueString(resourceGroup().id)}', 15)
 
-var networkInterfaceConsumerName = '${vmConsumerName}NetInt'
+var networkInterfaceConsumerName = '${vmWorkloadName}NetInt'
 
 var resolverEndpointIpAddress = '10.0.2.32'
 var dnsResolverName = '${name}Resolver'
 
+var customDnsServers = useOutboundResolver ? null : [ resolverEndpointIpAddress ]
 
-resource vnetConsumer 'Microsoft.Network/virtualNetworks@2021-05-01' = {
-  name: vnetConsumerName
+resource vnetWorkload 'Microsoft.Network/virtualNetworks@2021-05-01' = {
+  name: vnetWorkloadName
   location: location
   properties: {
     addressSpace: {
@@ -42,63 +46,37 @@ resource vnetConsumer 'Microsoft.Network/virtualNetworks@2021-05-01' = {
         vnetAddressPrefix
       ]
     }
-    // subnets: [
-    //   // {
-    //   //   name: consumerSubnetName
-    //   //   properties: {
-    //   //     addressPrefix: consumerSubnetPrefix
-    //   //     privateEndpointNetworkPolicies: 'Disabled'
-    //   //   }
-    //   // }
-    //   // {
-    //   //   name: backendSubnetName
-    //   //   properties: {
-    //   //     addressPrefix: backendSubnetPrefix
-    //   //     networkSecurityGroup: {
-    //   //       id: consumerSecurityGroup.id
-    //   //     }
-    //   //   }
-    //   // }
-    //   // {
-    //   //   name: resolverSubnetName
-    //   //   properties: {
-    //   //     addressPrefix: resolverSubnetPrefix
-    //   //     delegations: [
-    //   //       {
-    //   //         name: 'Microsoft.Network.dnsResolvers'
-    //   //         properties: {
-    //   //           serviceName: 'Microsoft.Network/dnsResolvers'
-    //   //         }
-    //   //       }
-    //   //     ]
-    //   //   }
-    //   // }
-    // ]
-  }
-}
-
-resource consumerSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
-  parent: vnetConsumer
-  name: consumerSubnetName
-  properties: {
-    addressPrefix: consumerSubnetPrefix
-    privateEndpointNetworkPolicies: 'Disabled'
-  }
-}
-
-resource backendSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
-  parent: vnetConsumer
-  name: backendSubnetName
-  properties: {
-    addressPrefix: backendSubnetPrefix
-    networkSecurityGroup: {
-      id: consumerSecurityGroup.id
+    dhcpOptions: {
+      dnsServers: customDnsServers
     }
   }
 }
 
-resource resolverSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
-  parent: vnetConsumer
+resource workloadSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: vnetWorkload
+  name: workloadSubnetName
+  properties: {
+    addressPrefix: workloadSubnetPrefix
+    privateEndpointNetworkPolicies: 'Disabled'
+  }
+  dependsOn : [
+    endpointSubnet
+  ]
+}
+
+resource endpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: vnetWorkload
+  name: endpointSubnetName
+  properties: {
+    addressPrefix: endpointSubnetPrefix
+    networkSecurityGroup: {
+      id: endpointSecurityGroup.id
+    }
+  }
+}
+
+resource resolverSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = if (useOutboundResolver) {
+  parent: vnetWorkload
   name: resolverSubnetName
   properties: {
     addressPrefix: resolverSubnetPrefix
@@ -111,20 +89,24 @@ resource resolverSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' =
       }
     ]
   }
+  dependsOn : [
+    endpointSubnet
+  ]
 }
 
 
-resource resolver 'Microsoft.Network/dnsResolvers@2022-07-01' = {
+resource resolver 'Microsoft.Network/dnsResolvers@2022-07-01' = if (useOutboundResolver) {
   name: dnsResolverName
   location: location
   properties: {
     virtualNetwork: {
-      id: vnetConsumer.id
+      id: vnetWorkload.id
     }
   }
 }
 
-resource outEndpoint 'Microsoft.Network/dnsResolvers/outboundEndpoints@2022-07-01' = {
+
+resource outEndpoint 'Microsoft.Network/dnsResolvers/outboundEndpoints@2022-07-01' = if (useOutboundResolver) {
   parent: resolver
   name: '${name}DnsOutbound'
   location: location
@@ -135,7 +117,7 @@ resource outEndpoint 'Microsoft.Network/dnsResolvers/outboundEndpoints@2022-07-0
   }
 }
 
-resource fwruleSet 'Microsoft.Network/dnsForwardingRulesets@2022-07-01' = {
+resource fwruleSet 'Microsoft.Network/dnsForwardingRulesets@2022-07-01' = if (useOutboundResolver) {
   name: '${dnsResolverName}RuleSet'
   location: location
   properties: {
@@ -147,23 +129,37 @@ resource fwruleSet 'Microsoft.Network/dnsForwardingRulesets@2022-07-01' = {
   }
 }
 
-resource resolverLink 'Microsoft.Network/dnsForwardingRulesets/virtualNetworkLinks@2022-07-01' = {
+resource resolverLink 'Microsoft.Network/dnsForwardingRulesets/virtualNetworkLinks@2022-07-01' = if (useOutboundResolver) {
   parent: fwruleSet
   name: '${dnsResolverName}DnsVnetLink'
   properties: {
     virtualNetwork: {
-      id: vnetConsumer.id
+      id: vnetWorkload.id
     }
   }
 }
 
 
 // this could be used to blackhole all domains by default
-resource fwRules 'Microsoft.Network/dnsForwardingRulesets/forwardingRules@2022-07-01' = {
+resource blackholeAllDnsRequests 'Microsoft.Network/dnsForwardingRulesets/forwardingRules@2022-07-01' = if (useOutboundResolver){
   parent: fwruleSet
   name: '${dnsResolverName}ForwardAllDnsRequests'
   properties: {
     domainName: '.' // forward all requests
+    targetDnsServers: [
+      {
+        ipAddress: '192.0.2.53' // 192.0.2.0/24 TEST-NET-1 (RFC-5737) , resolverEndpointIpAddress
+        port: 53
+      }
+    ]
+  }
+}
+
+resource allowSlashdotAllDnsRequests 'Microsoft.Network/dnsForwardingRulesets/forwardingRules@2022-07-01' = if (useOutboundResolver){
+  parent: fwruleSet
+  name: '${dnsResolverName}AllowSlashdotDnsRequests'
+  properties: {
+    domainName: 'slashdot.org.' // forward all requests
     targetDnsServers: [
       {
         ipAddress: resolverEndpointIpAddress
@@ -179,18 +175,8 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2021-05-01' = {
   location: location
   properties: {
     subnet: {
-      id: backendSubnet.id
+      id: endpointSubnet.id
     }
-    // customNetworkInterfaceName: networkInterfaceConsumer.name
-    // ipConfigurations: [
-    //   {
-    //     name: 'privateEndpointIpConfig'
-    //     properties: {
-    //       groupId: 'Dynamic'
-    //       memberName: 'myMember'
-    //     }
-    //   }
-    // ]
     customNetworkInterfaceName: networkInterfaceConsumerName
     ipConfigurations: [
       {
@@ -211,12 +197,12 @@ resource privateEndpoint 'Microsoft.Network/privateEndpoints@2021-05-01' = {
     ]
   }
   dependsOn: [
-    vnetConsumer
+    vnetWorkload
   ]
 }
 
-resource vmConsumerPip 'Microsoft.Network/publicIPAddresses@2023-04-01' =  {
-  name: '${vmConsumerName}PublicIp'
+resource vmWorkloadPip 'Microsoft.Network/publicIPAddresses@2023-04-01' =  {
+  name: '${vmWorkloadName}PublicIp'
   location: location
   sku: {
     name: 'Standard'
@@ -229,7 +215,7 @@ resource vmConsumerPip 'Microsoft.Network/publicIPAddresses@2023-04-01' =  {
   }
 }
 
-resource consumerSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
+resource workloadSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
   name: '${name}ConsumerSecurityGroup-${location}'
   location: location
   properties: {
@@ -251,45 +237,13 @@ resource consumerSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-04-
         }
       }
       // { 
-      //   name: 'AllowDNSOutboundLocal'
+      //   name: 'AllowDnsInbound'
       //   properties: {
-      //     description: 'Allow Workload Outbound Traffic'
+      //     description: 'Allow DNS Inbound Traffic (resolver to private-link endpoint)'
       //     protocol: '*'
       //     sourcePortRange: '*'
       //     destinationPortRanges: [
       //       '53'
-      //     ]
-      //     sourceAddressPrefix: 'virtualNetwork'
-      //     destinationAddressPrefix: '168.63.129.16/32'
-      //     access: 'Allow'
-      //     priority: 102
-      //     direction: 'Outbound'
-      //   }
-      // }
-      { 
-        name: 'AllowDnsInbound'
-        properties: {
-          description: 'Allow DNS Inbound Traffic (resolver to private-link endpoint)'
-          protocol: '*'
-          sourcePortRange: '*'
-          destinationPortRanges: [
-            '53'
-          ]
-          sourceAddressPrefix: 'virtualNetwork'
-          destinationAddressPrefix: 'virtualNetwork'
-          access: 'Allow'
-          priority: 101
-          direction: 'Inbound'
-        }
-      }
-      // { 
-      //   name: 'AllowDNSInbound'
-      //   properties: {
-      //     description: 'Allow DNS Traffic'
-      //     protocol: '*'
-      //     sourcePortRange: '*'
-      //     destinationPortRanges: [
-      //       '54'
       //     ]
       //     sourceAddressPrefix: 'virtualNetwork'
       //     destinationAddressPrefix: 'virtualNetwork'
@@ -314,47 +268,76 @@ resource consumerSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-04-
           direction: 'Inbound'
         }
       }
-      // {
-      //   name: 'DenyAllInbound'
+    ]
+  }
+}
+
+resource endpointSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {
+  name: '${name}BackendSecurityGroup-${location}'
+  location: location
+  properties: {
+    securityRules: [
+      // { 
+      //   name: 'AllowDnsOutbound'
       //   properties: {
-      //     description: 'No further inbound traffic allowed.'
+      //     description: 'Allow Workload Outbound DNS Traffic (resolver to private-link endpoint)'
       //     protocol: '*'
       //     sourcePortRange: '*'
-      //     destinationPortRange: '*'
-      //     sourceAddressPrefix: '*'
-      //     destinationAddressPrefix: '*'
-      //     access: 'Deny'
-      //     priority: 1000
-      //     direction: 'Inbound'
+      //     destinationPortRanges: [
+      //       '53'
+      //     ]
+      //     sourceAddressPrefix: 'virtualNetwork'
+      //     destinationAddressPrefix: 'virtualNetwork'
+      //     access: 'Allow'
+      //     priority: 101
+      //     direction: 'Outbound'
       //   }
       // }
-      // {
-      //   name: 'DenyAllOutbound'
+      { 
+        name: 'AllowDnsInbound'
+        properties: {
+          description: 'Allow DNS Inbound Traffic (resolver to private-link endpoint)'
+          protocol: '*'
+          sourcePortRange: '*'
+          destinationPortRanges: [
+            '53'
+          ]
+          sourceAddressPrefix: 'virtualNetwork'
+          destinationAddressPrefix: 'virtualNetwork'
+          access: 'Allow'
+          priority: 101
+          direction: 'Inbound'
+        }
+      }
+      // { 
+      //   name: 'AllowSSHInbound'
       //   properties: {
-      //     description: 'No further outbound traffic allowed.'
-      //     protocol: '*'
+      //     description: 'Allow SSH Traffic'
+      //     protocol: 'Tcp'
       //     sourcePortRange: '*'
-      //     destinationPortRange: '*'
-      //     sourceAddressPrefix: '*'
-      //     destinationAddressPrefix: '*'
-      //     access: 'Deny'
-      //     priority: 1000
-      //     direction: 'Outbound'
+      //     destinationPortRanges: [
+      //       '22'
+      //     ]
+      //     sourceAddressPrefix: '0.0.0.0/0'
+      //     destinationAddressPrefix: 'virtualNetwork'
+      //     access: 'Allow'
+      //     priority: 100
+      //     direction: 'Inbound'
       //   }
       // }
     ]
   }
 }
 
-resource consumerNetworkInterface 'Microsoft.Network/networkInterfaces@2021-05-01' = {
-  name: consumerNetworkInterfaceName
+resource workloadNetworkInterface 'Microsoft.Network/networkInterfaces@2021-05-01' = {
+  name: workloadNetworkInterfaceName
   location: location
   tags: {
-    displayName: consumerNetworkInterfaceName
+    displayName: workloadNetworkInterfaceName
   }
   properties: {
     networkSecurityGroup: {
-      id: consumerSecurityGroup.id
+      id: workloadSecurityGroup.id
     }
     ipConfigurations: [
       {
@@ -362,10 +345,10 @@ resource consumerNetworkInterface 'Microsoft.Network/networkInterfaces@2021-05-0
         properties: {
           privateIPAllocationMethod: 'Dynamic'
           publicIPAddress: {
-            id: vmConsumerPip.id
+            id: vmWorkloadPip.id
           }
           subnet: {
-            id: consumerSubnet.id
+            id: workloadSubnet.id
           }
         }
       }
@@ -374,11 +357,11 @@ resource consumerNetworkInterface 'Microsoft.Network/networkInterfaces@2021-05-0
 }
 
 
-resource vmConsumer 'Microsoft.Compute/virtualMachines@2021-11-01' = {
-  name: vmConsumerName
+resource vmWorkload 'Microsoft.Compute/virtualMachines@2021-11-01' = {
+  name: vmWorkloadName
   location: location
   tags: {
-    displayName: vmConsumerName
+    displayName: vmWorkloadName
   }
   properties: {
     hardwareProfile: {
@@ -395,8 +378,8 @@ resource vmConsumer 'Microsoft.Compute/virtualMachines@2021-11-01' = {
       }
       imageReference: {
         publisher: 'Canonical'
-        offer: '0001-com-ubuntu-server-mantic'
-        sku: '23_10-gen2'
+        offer: 'ubuntu-24_04-lts'
+        sku: 'ubuntu-pro-gen1'
         version: 'latest'
       }
       dataDisks: []
@@ -410,7 +393,7 @@ resource vmConsumer 'Microsoft.Compute/virtualMachines@2021-11-01' = {
     networkProfile: {
       networkInterfaces: [
         {
-          id: consumerNetworkInterface.id
+          id: workloadNetworkInterface.id
           properties: {
             deleteOption: 'Delete'
             primary: true
@@ -420,7 +403,7 @@ resource vmConsumer 'Microsoft.Compute/virtualMachines@2021-11-01' = {
     }
     //userData: loadFileAsBase64(userDataPath)
     osProfile: {
-      computerName: vmConsumerName
+      computerName: vmWorkloadName
       adminUsername: vmAdminUsername
       adminPassword: vmAdminPassword
       linuxConfiguration: {

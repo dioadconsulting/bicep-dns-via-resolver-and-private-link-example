@@ -35,6 +35,10 @@ write_files:
         debug
         errors
         ready 0.0.0.0:80
+        template ANY ANY google.com. {
+          rcode NXDOMAIN
+          answer "Denied"
+        }
         forward . 8.8.8.8:53
       }
     owner: root:root
